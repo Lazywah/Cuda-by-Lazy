@@ -1,7 +1,29 @@
 ﻿#include <iostream>
+#include <string>
 #include <cuda_runtime.h>
 #include <chrono>
 #include <numeric>
+#include <fstream>
+#include <sstream>
+#include <iomanip>  
+#include <filesystem>
+#include <windows.h>    // For CreateDirectoryA (Windows API)
+#include <limits>       // For std::numeric_limits
+
+#define Mal 0
+#define H2D 1
+#define Run 2
+#define D2H 3
+#define BW 4
+
+#define For 1
+#define ForBW 2
+
+//[version][type][times]
+double *allTime[7][5];
+//[Mal][Rdc][RdcBW]
+double *cpuTime[3];
+std::string title[5] = {"Time_Mal(ms)", "Time_H2D(ms)", "Time_Run(ms)", "Time_D2H(ms)", "BandWidth(GB/s)"};
 
 // REDUCTION 0 – Interleaved Addressing
 __global__ void reduce0(int* g_in_data, int* g_out_data) {
@@ -285,11 +307,9 @@ void runversionwithoutoutput(int version=7)
 
 void runversion(int version, int time)
 {
-    for (int i = 0; i < time; i++)
+    for (int t = 0; t < time; t++)
     {
-        std::cout << "\033[0;30;43mCase #" << i + 1 << ":\033[0m\n";
-
-        auto startMal = std::chrono::high_resolution_clock::now(); // start timer
+        std::cout << "\033[0;30;43mCase #" << t + 1 << ":\033[0m\n";
 
         int n = 1 << 22; // Increase to about 4M elements
         size_t bytes = n * sizeof(int);
@@ -306,6 +326,8 @@ void runversion(int version, int time)
         for (int i = 0; i < n; i++) {
             host_input_data[i] = rand() % 100;
         }
+
+        auto startMal = std::chrono::high_resolution_clock::now(); // start timer
 
         // Allocating memory on GPU for device arrays
         cudaMalloc(&dev_input_data, bytes);
@@ -324,7 +346,11 @@ void runversion(int version, int time)
 
         int blockSize = 256; // number of threads per block
 
-        auto startRun = std::chrono::high_resolution_clock::now(); // start timer
+        cudaEvent_t startRun, stopRun;
+        cudaEventCreate(&startRun);
+        cudaEventCreate(&stopRun);
+
+        cudaEventRecord(startRun, 0);
 
         // Launch Kernel and Synchronize threads
         int num_blocks;
@@ -364,7 +390,7 @@ void runversion(int version, int time)
                 break;
             }
         }
-        else
+        else if(version == 7)
         {
             switch (blockSize) {
             case 512:
@@ -388,8 +414,12 @@ void runversion(int version, int time)
         }
         cudaDeviceSynchronize();
 
-        auto stopRun = std::chrono::high_resolution_clock::now();
-        auto durationRun = std::chrono::duration_cast<std::chrono::microseconds>(stopRun - startRun).count() / 1000.0; // duration in milliseconds with three decimal points
+        cudaEventRecord(stopRun, 0);
+        cudaEventSynchronize(stopRun);
+
+        float elapsedTime_ms = 0;
+        cudaEventElapsedTime(&elapsedTime_ms, startRun, stopRun);
+        double durationRun = (double)elapsedTime_ms;
 
         auto startD2H = std::chrono::high_resolution_clock::now(); // start timer
 
@@ -423,12 +453,20 @@ void runversion(int version, int time)
         std::cout << "Reduced result: " << finalResult << std::endl;
         std::cout << "Malloc Time elapsed: " << durationMal << " ms" << std::endl;
         std::cout << "H2D Time elapsed: " << durationH2D << " ms" << std::endl;
-        std::cout << "\033[0;30;47mRun Time elapsed: " << durationRun << " ms\033[0m" << std::endl;
+        std::cout << "\033[0;30;47mRun Time elapsed: " << std::fixed << std::setprecision(3) << durationRun << " ms\033[0m" << std::endl;
         std::cout << "D2H Time elapsed: " << durationD2H << " ms" << std::endl;
         std::cout << "Effective bandwidth: " << bandwidth << " GB/s" << std::endl;
         std::cout << std::endl;
 
+        allTime[version - 1][Mal][t] = durationMal;
+        allTime[version - 1][H2D][t] = durationH2D;
+        allTime[version - 1][Run][t] = durationRun;
+        allTime[version - 1][D2H][t] = durationD2H;
+        allTime[version - 1][BW][t] = bandwidth;
+
         // Freeing memory
+        cudaEventDestroy(startRun);
+        cudaEventDestroy(stopRun);
         cudaFree(dev_input_data);
         cudaFree(dev_output_data);
         delete[] host_input_data;
@@ -436,28 +474,273 @@ void runversion(int version, int time)
     }
 }
 
+void runCPU(int time)
+{
+    for (int t = 0; t < time; t++)
+    {
+        std::cout << "\033[0;30;43mCase #" << t + 1 << ":\033[0m\n";
+
+        int n = 1 << 22; // Increase to about 4M elements
+        size_t bytes = n * sizeof(int);
+
+        auto startMal = std::chrono::high_resolution_clock::now();
+
+        // Host/CPU arrays
+        int* host_input_data = new int[n];
+        int* host_output_data = new int[(n + 255) / 256]; // to have sufficient size for output array
+
+        auto stopMal = std::chrono::high_resolution_clock::now();
+        auto durationMal = std::chrono::duration_cast<std::chrono::microseconds>(stopMal - startMal).count() / 1000.0; // duration in milliseconds with three decimal points
+
+        // Init data
+        srand(42); // Fixed seed
+        for (int i = 0; i < n; i++) {
+            host_input_data[i] = rand() % 100;
+        }
+
+        auto startRun = std::chrono::high_resolution_clock::now();
+
+        int resultFor = 0;
+        for (int i = 0; i < n; i++)
+            resultFor += host_input_data[i];
+
+        auto stopRun = std::chrono::high_resolution_clock::now();
+        auto durationRun = std::chrono::duration_cast<std::chrono::microseconds>(stopRun - startRun).count() / 1000.0; // duration in milliseconds with three decimal points
+
+        // CPU Summation for verification
+        int cpuResult = std::accumulate(host_input_data, host_input_data + n, 0);
+        if (cpuResult == resultFor) {
+            std::cout << "\033[32m"; // Set text color to green
+            std::cout << "Verification successful: GPU result matches CPU result.\n";
+            std::cout << "GPU Result: " << resultFor << ", CPU Result: " << cpuResult << std::endl;
+        }
+        else {
+            std::cout << "\033[31m"; // Set text color to red
+            std::cout << "Verification failed: GPU result (" << resultFor << ") does not match CPU result (" << cpuResult << ").\n";
+            std::cout << "GPU Result: " << resultFor << ", CPU Result: " << cpuResult << std::endl;
+        }
+        std::cout << "\033[0m"; // Reset text color to default
+
+        double bandwidth = (durationRun > 0) ? (bytes / durationRun / 1e6) : 0; // computed in GB/s, handling zero duration
+        std::cout << "Reduced result: " << resultFor << std::endl;
+        std::cout << "Malloc Time elapsed: " << durationMal << " ms" << std::endl;
+        std::cout << "\033[0;30;47mRun Time elapsed: " << durationRun << " ms\033[0m" << std::endl;
+        std::cout << "Effective bandwidth: " << bandwidth << " GB/s" << std::endl;
+        std::cout << std::endl;
+
+        cpuTime[Mal][t] = durationMal;
+        cpuTime[For][t] = durationRun;
+        cpuTime[ForBW][t] = bandwidth;
+
+        delete[] host_input_data;
+        delete[] host_output_data;
+    }
+}
+
+std::string GetTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    // Format: YYYY-MM-DD_HH-MM-SS
+    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
+    return ss.str();
+}
+
+void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
+    std::string folderName = "Data_" + GetTimestamp();
+    std::string fullPath = baseDirectory + "\\" + folderName;
+
+    if (CreateDirectoryA(fullPath.c_str(), NULL) ||
+        GetLastError() == ERROR_ALREADY_EXISTS) {
+
+        std::cout << "Successfully created new directory: " << fullPath << std::endl;
+        
+        std::string csvPath = fullPath + "\\Summary_Data.csv";
+        std::string txtPath = fullPath + "\\Summary_Data.txt";
+
+        std::ofstream csvFile(csvPath);
+        if (csvFile.is_open()) {
+            for (int tt = 0; tt < 5; tt++)
+            {
+                csvFile << title[tt];
+                for (int i = 0; i < t; i++)
+                    csvFile << ",test" << i + 1;
+                csvFile << "\n";
+
+                if (v == 9)
+                {
+                    for (int ver = 1; ver < 8; ver++)
+                    {
+                        csvFile << "Ver." << ver;
+                        for (int test = 0; test < t; test++)
+                            csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << allTime[ver - 1][tt][test];
+                        csvFile << "\n";
+                    }
+                    csvFile << "CPU";
+                    if (tt == 0 || tt == 2 || tt == 4) 
+                        for (int test = 0; test < t; test++)
+                            csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt/2][test];
+                    csvFile << "\n\n";
+                }
+                else if(v != 8)
+                {
+                    csvFile << "Ver." << v;
+                    for (int test = 0; test < t; test++)
+                        csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << allTime[v - 1][tt][test];
+                    csvFile << "\n\n";
+                }
+                else
+                {
+                    csvFile << "CPU";
+                    if (tt == 0 || tt == 2 || tt == 4)
+                        for (int test = 0; test < t; test++)
+                            csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                    csvFile << "\n\n";
+                }
+            }
+
+            csvFile.close();
+            std::cout << "CSV file exported to directory.\n";
+        }
+        else {
+            std::cerr << "\033[0;30;41mError: Could not create CSV file in directory.\033[0m\n";
+        }
+
+        std::ofstream txtFile(txtPath);
+        if (txtFile.is_open()) {
+            for (int tt = 0; tt < 5; tt++)
+            {
+                txtFile << title[tt];
+                for (int i = 0; i < t; i++)
+                    txtFile << " | test" << i + 1;
+                txtFile << "\n";
+                txtFile << "--";
+                for (int i = 0; i < t; i++)
+                    txtFile << "|--";
+                txtFile << "\n";
+
+                if (v == 9)
+                {
+                    for (int ver = 1; ver < 8; ver++)
+                    {
+                        txtFile << "Ver." << ver;
+                        for (int test = 0; test < t; test++)
+                            txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << allTime[ver - 1][tt][test];
+                        txtFile << "\n";
+                    }
+                    if (tt == 0 || tt == 2 || tt == 4)
+                    {
+                        txtFile << "CPU";
+                        for (int test = 0; test < t; test++)
+                            txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                    }
+                    txtFile << "\n\n";
+                }
+                else if(v != 8)
+                {
+                    txtFile << "Ver." << v;
+                    for (int test = 0; test < t; test++)
+                        txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << allTime[v - 1][tt][test];
+                    txtFile << "\n\n";
+                }
+                else
+                {
+                    if (tt == 0 || tt == 2 || tt == 4)
+                    {
+                        txtFile << "CPU";
+                        for (int test = 0; test < t; test++)
+                            txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                    }
+                    txtFile << "\n\n";
+                }
+            }
+            txtFile.close();
+            std::cout << "TXT file exported to directory.\n";
+        }
+        else {
+            std::cerr << "\033[0;30;41mError: Could not create TXT file in directory.\033[0m\n";
+        }
+        std::cout << "\033[0;30;42mFile exported successfully\033[0m\n\n";
+    }
+    else {
+        std::cerr << "\033[0;30;41mError: Could not create directory " << fullPath << ". Error message: " << GetLastError() << "\033[0m\n";
+    }
+}
+
 // I hope to use this main file for all of the reduction files
 int main() {
 Choice:
     int version, time;
-    std::cout << "Enter the running Version(1~7) or Run All Verion(8): ";
+    std::string YorN;
+    std::cout << "Enter the running Version(1~7), CPU(8) or Run All Verion(9): ";
     std::cin >> version;
     std::cout << "Enter the number of runs: ";
     std::cin >> time;
     std::cout << "\n";
-    if (version < 1 || version>8)
+    if (version < 1 || version>9)
     {
         std::cout << "Out if range! Please choice again!";
         goto Choice;
     }
+
+    for (int i = 0; i < 7; i++)
+        for (int j = 0; j < 5; j++)
+            allTime[i][j] = new double[time];
+    for (int i = 0; i < 3; i++)
+        cpuTime[i] = new double[time];
+
     runversionwithoutoutput();
-    if (version != 8)
+    if (version == 8)
+    {
+        std::cout << "\033[33mCPU" << ":\033[0m\n\n";
+        runCPU(time);
+        std::cout << "\n\n";
+    }
+    else if (version != 9)
+    {
+        std::cout << "\033[33mVERSION #" << version << ":\033[0m\n\n";
         runversion(version, time);
+        std::cout << "\n\n";
+    }
     else
+    {
         for (int ver = 1; ver < 8; ver++)
         {
             std::cout << "\033[33mVERSION #" << ver << ":\033[0m\n\n";
             runversion(ver, time);
             std::cout << "\n\n";
         }
+        std::cout << "\033[33mCPU" << ":\033[0m\n\n";
+        runCPU(time);
+        std::cout << "\n\n";
+    }
+YorN:
+    std::cout << "\033[0;30;43mDo you want to export the data? [Y/N]:\033[0m ";
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    getline(std::cin, YorN);
+    std::cout << "\n";
+    if (YorN[0] == 'Y' || YorN[0] == 'y')
+    {
+        std::string exportBaseDir = "..\\data_resuction";
+        if (CreateDirectoryA(exportBaseDir.c_str(), NULL) ||
+            GetLastError() == ERROR_ALREADY_EXISTS) {
+            ExportDataWindows(version, time, exportBaseDir);
+        }
+        else {
+            std::cerr << "\033[0;30;41mError: Could not create directory " << exportBaseDir << ". Error message: " << GetLastError() << "\033[0m\n";
+        }
+    }
+    else if (YorN[0] == 'N' || YorN[0] == 'n')
+    {}
+    else
+    {
+        std::cout << "\033[0;30;41mUnrecognized... Please enter again!\033[0m\n\n";
+        goto YorN;
+    }
+    for (int i = 0; i < 7; i++)
+        for (int j = 0; j < 5; j++)
+            delete[] allTime[i][j];
+    for (int i = 0; i < 3; i++)
+        delete[] cpuTime[i];
 }
