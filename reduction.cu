@@ -455,7 +455,7 @@ void runversion(int version, int time)
         std::cout << "H2D Time elapsed: " << durationH2D << " ms" << std::endl;
         std::cout << "\033[0;30;47mRun Time elapsed: " << std::fixed << std::setprecision(3) << durationRun << " ms\033[0m" << std::endl;
         std::cout << "D2H Time elapsed: " << durationD2H << " ms" << std::endl;
-        std::cout << "Effective bandwidth: " << bandwidth << " GB/s" << std::endl;
+        std::cout << "Effective bandwidth: " << std::fixed << std::setprecision(4) << bandwidth << " GB/s" << std::endl;
         std::cout << std::endl;
 
         allTime[version - 1][Mal][t] = durationMal;
@@ -525,7 +525,7 @@ void runCPU(int time)
         std::cout << "Reduced result: " << resultFor << std::endl;
         std::cout << "Malloc Time elapsed: " << durationMal << " ms" << std::endl;
         std::cout << "\033[0;30;47mRun Time elapsed: " << durationRun << " ms\033[0m" << std::endl;
-        std::cout << "Effective bandwidth: " << bandwidth << " GB/s" << std::endl;
+        std::cout << "Effective bandwidth: " << std::fixed << std::setprecision(4) << bandwidth << " GB/s" << std::endl;
         std::cout << std::endl;
 
         cpuTime[Mal][t] = durationMal;
@@ -577,10 +577,12 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                             csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << allTime[ver - 1][tt][test];
                         csvFile << "\n";
                     }
-                    csvFile << "CPU";
-                    if (tt == 0 || tt == 2 || tt == 4) 
+                    if (tt == 0 || tt == 2 || tt == 4)
+                    {
+                        csvFile << "CPU";
                         for (int test = 0; test < t; test++)
-                            csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt/2][test];
+                            csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                    }
                     csvFile << "\n\n";
                 }
                 else if(v != 8)
@@ -592,10 +594,12 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                 }
                 else
                 {
-                    csvFile << "CPU";
                     if (tt == 0 || tt == 2 || tt == 4)
+                    {
+                        csvFile << "CPU";
                         for (int test = 0; test < t; test++)
                             csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                    }
                     csvFile << "\n\n";
                 }
             }
