@@ -582,8 +582,9 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                         csvFile << "CPU";
                         for (int test = 0; test < t; test++)
                             csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                        csvFile << "\n";
                     }
-                    csvFile << "\n\n";
+                    csvFile << "\n";
                 }
                 else if(v != 8)
                 {
@@ -599,8 +600,8 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                         csvFile << "CPU";
                         for (int test = 0; test < t; test++)
                             csvFile << "," << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                        csvFile << "\n\n";
                     }
-                    csvFile << "\n\n";
                 }
             }
 
@@ -638,8 +639,9 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                         txtFile << "CPU";
                         for (int test = 0; test < t; test++)
                             txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                        txtFile << "\n";
                     }
-                    txtFile << "\n\n";
+                    txtFile << "\n";
                 }
                 else if(v != 8)
                 {
@@ -655,8 +657,8 @@ void ExportDataWindows(int v, int t, const std::string& baseDirectory) {
                         txtFile << "CPU";
                         for (int test = 0; test < t; test++)
                             txtFile << " | " << std::fixed << std::setprecision(tt == 4 ? 4 : 3) << cpuTime[tt / 2][test];
+                        txtFile << "\n\n";
                     }
-                    txtFile << "\n\n";
                 }
             }
             txtFile.close();
